@@ -51,6 +51,8 @@ export DEFAULT_BRANCH=$(curl -s -H "Authorization: token $GH_TOKEN" \
   https://api.github.com/repos/$GITHUB_REPOSITORY | jq -r .default_branch)
 export RERUN_RUNNER=$(curl -s -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" \
   "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/variables/RERUN_RUNNER" | jq -r '.value')
+export SOURCE_REPOSITORY=$(curl -s -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" \
+  "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/variables/SOURCE_REPOSITORY" | jq -r '.value')
 export TARGET_REPOSITORY=$(curl -s -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" \
   "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/variables/TARGET_REPOSITORY" | jq -r '.value')
 
@@ -204,8 +206,8 @@ elif [[ "${JOBS_ID}" == "3" ]]; then
   METHOD="getInfo"
   NONCE=$(date +%s)
   METHODS="method=${METHOD}&nonce=${NONCE}"
-  DOCKER="/mnt/disks/deeplearning/usr/bin/docker"
-  GCLOUD="/mnt/disks/deeplearning/usr/bin/gcloud"  
+  DOCKER=/mnt/disks/deeplearning/usr/bin/docker
+  GCLOUD=/mnt/disks/deeplearning/usr/bin/gcloud
   STATUS=$($DOCKER exec mydb supervisorctl status freqtrade_live)
   BASE_URL="https://raw.githubusercontent.com/eq19/maps/$MAP_BRANCH/user_data"
   PARAMS_URL="https://raw.githubusercontent.com/eq19/maps/$MAP_BRANCH/pythonCode/params.py"
@@ -319,6 +321,8 @@ elif [[ "${JOBS_ID}" == "3" ]]; then
       $DOCKER exec mydb sed -i 's|"dry_run": true|"dry_run": true|g' $CONFIG_LIVE
       $DOCKER exec mydb sed -i "s|$TRADING_BOT_TOKEN|$MONITOR_BOT_TOKEN|g" $CONFIG_DRY
       $DOCKER exec mydb sed -i "s|$MONITOR_BOT_TOKEN|$TRADING_BOT_TOKEN|g" $CONFIG_LIVE
+      $DOCKER exec mydb bash -c "jq '.telegram.enabled = true' '$CONFIG_DRY' > /tmp/c && mv /tmp/c '$CONFIG_DRY'"
+      $DOCKER exec mydb bash -c "jq '.telegram.enabled = true' '$CONFIG_LIVE' > /tmp/c && mv /tmp/c '$CONFIG_LIVE'"
 
       curl -L -s -X PATCH \
         -H "Accept: application/vnd.github+json" \
@@ -336,6 +340,22 @@ elif [[ "${JOBS_ID}" == "3" ]]; then
         --arg value "$($DOCKER exec mydb cat /home/runner/data_live/strategies/fibbo.json)")" \
         https://api.github.com/repos/$GITHUB_REPOSITORY/actions/variables/PARAMS_LIVE
 
+      curl -L -s -X PATCH \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer $GH_TOKEN" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -d "$(jq -n '{name:"PARAMS_DRY", value:$value}' \
+        --arg value "$($DOCKER exec mydb cat /home/runner/data_dry/strategies/fibbo.json)")" \
+        https://api.github.com/repos/$SOURCE_REPOSITORY/actions/variables/PARAMS_DRY
+
+      curl -L -s -X PATCH \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer $GH_TOKEN" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -d "$(jq -n '{name:"PARAMS_LIVE", value:$value}' \
+        --arg value "$($DOCKER exec mydb cat /home/runner/data_live/strategies/fibbo.json)")" \
+        https://api.github.com/repos/$SOURCE_REPOSITORY/actions/variables/PARAMS_LIVE
+
     else
       echo -e "$hr\nDry-run is not better than Live mode.\nLet dry-run to challenge a new config."
 
@@ -348,6 +368,7 @@ elif [[ "${JOBS_ID}" == "3" ]]; then
         "PARAMS_JSON"
       )
 
+      $DOCKER exec mydb bash -c "jq '.telegram.enabled = true' '$CONFIG_LIVE' > /tmp/c && mv /tmp/c '$CONFIG_LIVE'"
       $DOCKER exec mydb bash -c "jq '.telegram.enabled = true | .api_server.listen_port = 8081' $CONFIG > $CONFIG_DRY"
       $DOCKER exec mydb sed -i "s|your_telegram_token|$MONITOR_BOT_TOKEN|g" $CONFIG_DRY
       $DOCKER exec mydb sed -i "s|tradesv3|tradesv3_dry|g" $CONFIG_DRY
